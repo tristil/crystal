@@ -1,9 +1,12 @@
-require "./lib_pcl"
-
 @[NoInline]
 fun get_stack_top : Void*
   dummy :: Int32
   pointerof(dummy) as Void*
+end
+
+@[Link(ldflags: "crystal_extern.o")]
+lib CrystalExtern
+  fun switch_stacks(current : Void**, to : Void*)
 end
 
 class Fiber
@@ -21,8 +24,24 @@ class Fiber
   def initialize(&@proc)
     @stack = Fiber.allocate_stack
     @stack_top = @stack_bottom = @stack + STACK_SIZE
-    @cr = LibPcl.co_create(->(fiber) { (fiber as Fiber).run }, self as Void*, @stack, STACK_SIZE)
-    LibPcl.co_set_data(@cr, self as Void*)
+    # @cr = LibPcl.co_create(->(fiber) { (fiber as Fiber).run }, self as Void*, @stack, STACK_SIZE)
+
+    fiber_main = ->(f : Void*) { (f as Fiber).run }
+
+    stack_ptr = @stack + STACK_SIZE - sizeof(UInt64)
+    stack_ptr = Pointer(UInt64).new(stack_ptr.address & ~0x0f_u64)
+    @stack_top = (stack_ptr - 7) as Void*
+
+    stack_ptr[0] = fiber_main.pointer.address
+    stack_ptr[-1] = self.object_id.to_u64
+
+  # stack = (unsigned long *) (malloc(STACK_SIZE) + STACK_SIZE - sizeof(unsigned long));
+  # stack = (void *)((unsigned long)stack & ~0x0fUL);
+  # stack[0] = (unsigned long)func;
+  # stack[-1] = arg;
+  # // stack[-2] = (unsigned long)&stack[-1];
+
+  # fiber.stack = &stack[-7];
 
     @prev_fiber = nil
     if last_fiber = @@last_fiber
@@ -34,12 +53,10 @@ class Fiber
   end
 
   def initialize
-    @cr = LibPcl.co_current
     @proc = ->{}
     @stack = Pointer(Void).null
     @stack_top = get_stack_top
     @stack_bottom = LibGC.stackbottom
-    LibPcl.co_set_data(@cr, self as Void*)
 
     @@first_fiber = @@last_fiber = self
   end
@@ -85,30 +102,24 @@ class Fiber
     @@rescheduler = rescheduler
   end
 
-  @[NoInline]
-  def resume
-    Fiber.current.stack_top = get_stack_top
-
-    LibGC.stackbottom = @stack_bottom
-    LibPcl.co_call(@cr)
+  protected def stack_top_ptr
+    pointerof(@stack_top)
   end
 
-  def self.current
-    if current_data = LibPcl.co_get_data(LibPcl.co_current)
-      current_data as Fiber
-    else
-      raise "Could not get the current fiber"
-    end
+  @[NoInline]
+  def resume
+    current, @@current = @@current, self
+    CrystalExtern.switch_stacks(current.stack_top_ptr, @stack_top)
+
+    # Fiber.current.stack_top = get_stack_top
+
+    LibGC.stackbottom = @stack_bottom
+    # LibPcl.co_call(@cr)
   end
 
   protected def push_gc_roots
     # Push the used section of the stack
     LibGC.push_all_eager @stack_top, @stack_bottom
-
-    # PCL stores context (setjmp or ucontext) in the first bytes of the given stack
-    ptr = @cr as Void*
-    # HACK: the size of the context varies on each platform
-    LibGC.push_all_eager ptr, ptr + 1024
   end
 
   @@prev_push_other_roots = LibGC.get_push_other_roots
@@ -124,10 +135,18 @@ class Fiber
     end
   end
 
-  LibPcl.co_thread_init
   @@root = new
 
   def self.root
     @@root
   end
+
+  # @[ThreadLocal]
+  @@current = root
+
+  def self.current
+    @@current
+  end
+
+
 end
