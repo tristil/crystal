@@ -4,7 +4,11 @@ fun get_stack_top : Void*
   pointerof(dummy) as Void*
 end
 
-@[Link(ldflags: "crystal_extern.o")]
+ifdef darwin
+  @[Link(ldflags: "crystal_extern_darwin.o")]
+else
+  @[Link(ldflags: "crystal_extern_linux.o")]
+end
 lib CrystalExtern
   fun switch_stacks(current : Void**, to : Void*)
 end
