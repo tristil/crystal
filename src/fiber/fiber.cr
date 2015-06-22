@@ -4,15 +4,6 @@ fun get_stack_top : Void*
   pointerof(dummy) as Void*
 end
 
-ifdef darwin
-  @[Link(ldflags: "crystal_extern_darwin.o")]
-else
-  @[Link(ldflags: "crystal_extern_linux.o")]
-end
-lib CrystalExtern
-  fun switch_stacks(current : Void**, to : Void*)
-end
-
 class Fiber
   STACK_SIZE = 8 * 1024 * 1024
 
@@ -110,10 +101,31 @@ class Fiber
     pointerof(@stack_top)
   end
 
+  private def switch_stacks(current, to)
+    asm (%(
+      pushq %rdi
+      pushq %rbx
+      pushq %rbp
+      pushq %r12
+      pushq %r13
+      pushq %r14
+      pushq %r15
+      movq %rsp, ($0)
+      movq $1, %rsp
+      popq %r15
+      popq %r14
+      popq %r13
+      popq %r12
+      popq %rbp
+      popq %rbx
+      popq %rdi)
+    :: "r"(current), "r"(to))
+  end
+
   @[NoInline]
   def resume
     current, @@current = @@current, self
-    CrystalExtern.switch_stacks(current.stack_top_ptr, @stack_top)
+    switch_stacks(current.stack_top_ptr, @stack_top)
 
     # Fiber.current.stack_top = get_stack_top
 
