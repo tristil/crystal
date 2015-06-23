@@ -19,8 +19,6 @@ class Fiber
   def initialize(&@proc)
     @stack = Fiber.allocate_stack
     @stack_top = @stack_bottom = @stack + STACK_SIZE
-    # @cr = LibPcl.co_create(->(fiber) { (fiber as Fiber).run }, self as Void*, @stack, STACK_SIZE)
-
     fiber_main = ->(f : Void*) { (f as Fiber).run }
 
     stack_ptr = @stack + STACK_SIZE - sizeof(UInt64)
@@ -29,14 +27,6 @@ class Fiber
 
     stack_ptr[0] = fiber_main.pointer.address
     stack_ptr[-1] = self.object_id.to_u64
-
-  # stack = (unsigned long *) (malloc(STACK_SIZE) + STACK_SIZE - sizeof(unsigned long));
-  # stack = (void *)((unsigned long)stack & ~0x0fUL);
-  # stack[0] = (unsigned long)func;
-  # stack[-1] = arg;
-  # // stack[-2] = (unsigned long)&stack[-1];
-
-  # fiber.stack = &stack[-7];
 
     @prev_fiber = nil
     if last_fiber = @@last_fiber
@@ -101,7 +91,8 @@ class Fiber
     pointerof(@stack_top)
   end
 
-  private def switch_stacks(current, to)
+  @[NoInline]
+  protected def self.switch_stacks(current, to)
     asm (%(
       pushq %rdi
       pushq %rbx
@@ -122,20 +113,28 @@ class Fiber
     :: "r"(current), "r"(to))
   end
 
-  @[NoInline]
   def resume
     current, @@current = @@current, self
-    switch_stacks(current.stack_top_ptr, @stack_top)
-
-    # Fiber.current.stack_top = get_stack_top
-
-    LibGC.stackbottom = @stack_bottom
-    # LibPcl.co_call(@cr)
+    LibGC.stackbottom = @@current.stack_bottom
+    Fiber.switch_stacks(current.stack_top_ptr, @stack_top)
   end
 
   protected def push_gc_roots
     # Push the used section of the stack
     LibGC.push_all_eager @stack_top, @stack_bottom
+  end
+
+  @@root = new
+
+  def self.root
+    @@root
+  end
+
+  @[ThreadLocal]
+  @@current = root
+
+  def self.current
+    @@current
   end
 
   @@prev_push_other_roots = LibGC.get_push_other_roots
@@ -146,22 +145,9 @@ class Fiber
 
     fiber = @@first_fiber
     while fiber
-      fiber.push_gc_roots
+      fiber.push_gc_roots unless fiber == @@current
       fiber = fiber.next_fiber
     end
-  end
-
-  @@root = new
-
-  def self.root
-    @@root
-  end
-
-  # @[ThreadLocal]
-  @@current = root
-
-  def self.current
-    @@current
   end
 
 
