@@ -20,12 +20,7 @@ module ENV
   # Retrieves the value for environment variable named `key` as a `String`.
   # Raises `KeyError` if the named variable does not exist.
   def self.[](key : String)
-    value = self[key]?
-    if value
-      value
-    else
-      raise KeyError.new "Missing ENV key: #{key}"
-    end
+    fetch(key)
   end
 
   # Retrieves the value for environment variable named `key` as a `String?`.
@@ -50,6 +45,31 @@ module ENV
   # if it doesn't.
   def self.has_key?(key : String)
     !!LibC.getenv(key)
+  end
+
+  # Retrieve a value corresponding to a key. Raises a KeyError exception if the
+  # key does not exist.
+  #
+  def self.fetch(key)
+    fetch(key) do
+      raise KeyError.new "Missing ENV key: #{key.inspect}"
+    end
+  end
+
+  # Retrieve a value corresponding to a key. Return the second argument's value
+  # if the key does not exist.
+  #
+  def self.fetch(key, default)
+    fetch(key) { default }
+  end
+
+  # Retrieve a value corresponding to a key. Return the value of the block if
+  # the key does not exist.
+  #
+  def self.fetch(key)
+    value = self[key]?
+    return value if value
+    yield(key).to_s
   end
 
   # Returns an array of all the environment variable names
