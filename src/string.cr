@@ -887,6 +887,20 @@ class String
     self[0, size - 1]
   end
 
+  # Returns a new String with multiple consecutive whitespace characters
+  # replaced with a single space, and leading and ending whitespace characters
+  # removed.
+  #
+  # ```
+  # "spaces  in  between".squish  #=> "spaces in between"
+  # "text on two\r\n lines too".squish  #=> "text on two lines"
+  # "  spaces  everywhere  ".squish  #=> "text on two lines"
+  # ```
+  #
+  def squish
+    strip.gsub(/\s+/, ' ')
+  end
+
   def strip
     excess_right = 0
     while cstr[bytesize - 1 - excess_right].chr.whitespace?
